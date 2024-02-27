@@ -1,6 +1,6 @@
 import { initializeApp } from "firebase/app";
 import { Timestamp, getFirestore } from "firebase/firestore";
-import yargs from "yargs";
+import yargs, { describe } from "yargs";
 import fs from "fs";
 import * as path from "path";
 import mime from "mime-types";
@@ -42,7 +42,8 @@ const storage = getStorage();
 const backendURL = "http://127.0.0.1:5000";
 
 const projectId = "humanmade-b1f8c";
-const creationsUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents:runQuery`;
+const baseUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents`;
+const creationsUrl = `${baseUrl}:runQuery`;
 
 function bufferToHex(buffer: ArrayBuffer) {
 	return Array.from(new Uint8Array(buffer))
@@ -88,7 +89,7 @@ let getSim = async (tag: string, file: Buffer, creationID: string) => {
 			},
 		};
 
-		const commitUrl = `https://firestore.googleapis.com/v1/projects/${projectId}/databases/(default)/documents/creations/${creationID}:runQuery`;
+		const commitUrl = `${baseUrl}/creations/${creationID}:runQuery`;
 
 		const firebaseRes = await fetch(commitUrl, {
 			method: "POST",
@@ -117,7 +118,7 @@ let getSim = async (tag: string, file: Buffer, creationID: string) => {
 				const imageUrl = evidence.mapValue.fields[key].stringValue;
 				//check if the tagged image exists, get url if so
 
-				const imageSimRes = await fetch(backendURL + '/imageSimilarity', {
+				const imageSimRes = await fetch(backendURL + "/imageSimilarity", {
 					method: "POST",
 					body: JSON.stringify({ url: imageUrl, imageb64: file.toString("base64") }),
 				});
@@ -157,6 +158,12 @@ yargs(hideBin(process.argv))
 				default: false,
 				type: "boolean",
 			},
+			percentage:{
+				describe: "New percentage completion",
+				demandOption: true,
+				default: false,
+				type: "string",
+			},
 			creationID: {
 				describe: "Creation to commit to",
 				demandOption: true,
@@ -164,13 +171,13 @@ yargs(hideBin(process.argv))
 				type: "string",
 			},
 		},
-		async handler(argv: any) {
-			const { files, inputTags, description, usedAI, creationID } = argv;
+		async handler(argv: any) { 
+			const { files, inputTags, description, usedAI, creationID, percentage } = argv;
 
 			let evidence: { [key: string]: string } = {};
 
 			let hashes: string[] = [];
-			let tags: { [key: string]: number } = {};
+			let tags: { [key: string]: string } = {};
 
 			for (let index = 0; index < files.length; index++) {
 				const filename = files[index];
@@ -185,7 +192,7 @@ yargs(hideBin(process.argv))
 				} else {
 					const simScore = await getSim(tag, data, creationID);
 					if (simScore) {
-						tags[tag] = simScore as number;
+						tags[tag] = simScore as string;
 					}
 				}
 
@@ -199,6 +206,40 @@ yargs(hideBin(process.argv))
 			}
 
 			//push commit to firestore
+			const pushCommitUrl = `${baseUrl}/creations/${creationID}/commits`;
+
+			let idToken;
+			let uid;
+			try {
+				idToken = await fs.promises.readFile("./HumanMade/token.txt");
+				uid = await fs.promises.readFile("./HumanMade/uid.txt");
+			} catch (error) {	
+				console.log("\nMake sure to authenticate first with the 'login' command");
+			}
+
+			const commitData = {
+				fields: {
+					description: {stringValue: description},
+					uid: {stringValue: uid?.toString()},
+					percentage: {integerValue: percentage},
+					time: {timestampValue: new Date().toISOString()},
+					creationId: {stringValue: creationID},
+					evidence: {mapValue: {fields: Object.keys(evidence).map(key => ({key: {stringValue: evidence[key]}}))}},
+					hashes:{arrayValue: {values: hashes.map((hash) => ({stringValue: hash}))}},
+					blockchained: {booleanValue: false},
+					tags: {mapValue: {fields: Object.keys(tags).map(key => ({key: {integerValue: tags[key]}}))}},
+					usedAI: {booleanValue: usedAI},
+			}
+		};
+
+			const firebaseRes = await fetch(pushCommitUrl, {
+				method: "POST",
+				headers: {
+					Authorization: `Bearer ${idToken}`,
+					"Content-Type": "application/json",
+				},
+				body: JSON.stringify(commitData),
+			});
 		},
 	})
 	.parse();
