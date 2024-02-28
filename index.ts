@@ -101,8 +101,13 @@ let getSim = async (tag: string, file: Buffer, creationID: string) => {
 		});
 
 		const data = await firebaseRes.json();
-		const evidence = data[0]?.document?.fields?.evidence;
+		if (data[0]?.error) {
+			console.log("\nMake sure to authenticate first with the 'login' command");
+			return null;
+		}
 
+		const evidence = data[0]?.document?.fields?.evidence;
+		console.log("poop: ", commitUrl, "data: ", data, "evidence: ", evidence);
 		console.log(
 			"data: ",
 			data,
@@ -111,18 +116,25 @@ let getSim = async (tag: string, file: Buffer, creationID: string) => {
 			"field obj:",
 			evidence.mapValue.fields["mountain%2Bimage%2Fjpeg%2B1708722683111"].stringValue
 		);
+		console.log("poop2");
 
 		if (evidence) {
 			const key = Object.keys(evidence.mapValue.fields).find((key) => key.startsWith(tag));
 			if (key) {
 				const imageUrl = evidence.mapValue.fields[key].stringValue;
 				//check if the tagged image exists, get url if so
+				console.log("imageUrl: ", imageUrl);
+				//console.log("file: ", file.toString("base64"));
 
 				const imageSimRes = await fetch(backendURL + "/imageSimilarity", {
 					method: "POST",
 					body: JSON.stringify({ url: imageUrl, imageb64: file.toString("base64") }),
+					headers:{
+						'Content-Type': 'application/json',
+					}
 				});
 
+				console.log("imagesimres: ", imageSimRes);
 				const scoreObj = await imageSimRes.json();
 				return scoreObj.sim;
 			}
@@ -142,7 +154,7 @@ yargs(hideBin(process.argv))
 				demandOption: true,
 				type: "array",
 			},
-			tags: {
+			inputTags: {
 				describe: "Tags to commit, same order as files",
 				demandOption: true,
 				type: "array",
@@ -158,20 +170,18 @@ yargs(hideBin(process.argv))
 				default: false,
 				type: "boolean",
 			},
-			percentage:{
+			percentage: {
 				describe: "New percentage completion",
 				demandOption: true,
-				default: false,
 				type: "string",
 			},
 			creationID: {
 				describe: "Creation to commit to",
 				demandOption: true,
-				default: false,
 				type: "string",
 			},
 		},
-		async handler(argv: any) { 
+		async handler(argv: any) {
 			const { files, inputTags, description, usedAI, creationID, percentage } = argv;
 
 			let evidence: { [key: string]: string } = {};
@@ -206,33 +216,44 @@ yargs(hideBin(process.argv))
 			}
 
 			//push commit to firestore
-			const pushCommitUrl = `${baseUrl}/creations/${creationID}/commits`;
 
 			let idToken;
 			let uid;
 			try {
 				idToken = await fs.promises.readFile("./HumanMade/token.txt");
 				uid = await fs.promises.readFile("./HumanMade/uid.txt");
-			} catch (error) {	
+			} catch (error) {
 				console.log("\nMake sure to authenticate first with the 'login' command");
 			}
 
+			const pushCommitUrl = `${baseUrl}/creations/${creationID}/commits`;
+
 			const commitData = {
 				fields: {
-					description: {stringValue: description},
-					uid: {stringValue: uid?.toString()},
-					percentage: {integerValue: percentage},
-					time: {timestampValue: new Date().toISOString()},
-					creationId: {stringValue: creationID},
-					evidence: {mapValue: {fields: Object.keys(evidence).map(key => ({key: {stringValue: evidence[key]}}))}},
-					hashes:{arrayValue: {values: hashes.map((hash) => ({stringValue: hash}))}},
-					blockchained: {booleanValue: false},
-					tags: {mapValue: {fields: Object.keys(tags).map(key => ({key: {integerValue: tags[key]}}))}},
-					usedAI: {booleanValue: usedAI},
-			}
-		};
+					description: { stringValue: description },
+					uid: { stringValue: uid?.toString() },
+					percentage: { doubleValue: percentage },
+					time: { timestampValue: new Date().toISOString() },
+					creationId: { stringValue: creationID },
+					evidence: {
+						mapValue: {
+							fields: Object.fromEntries(Object.entries(evidence).map(([key, value]) => [key, { stringValue: value }])),
+						},
+					},
+					hashes: { arrayValue: { values: hashes.map((hash) => ({ stringValue: hash })) } },
+					blockchained: { booleanValue: false },
+					tags: {
+						mapValue: {
+							fields: Object.fromEntries(
+								Object.entries(tags).map(([key, value]) => [key, { doubleValue: value.toString() }])
+							),
+						},
+					},
+					usedAI: { booleanValue: usedAI },
+				},
+			};
 
-			const firebaseRes = await fetch(pushCommitUrl, {
+			const res = await fetch(pushCommitUrl, {
 				method: "POST",
 				headers: {
 					Authorization: `Bearer ${idToken}`,
@@ -240,6 +261,9 @@ yargs(hideBin(process.argv))
 				},
 				body: JSON.stringify(commitData),
 			});
+
+			const data = await res.json();
+			console.log("data: ", data);
 		},
 	})
 	.parse();
