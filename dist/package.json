@@ -26,6 +26,6 @@
     "typescript": "^5.3.3"
   },
   "bin": {
-    "mytool": "./path/to/humanmade.js"
+    "humanmade": "humanmade.js"
   }
 }
