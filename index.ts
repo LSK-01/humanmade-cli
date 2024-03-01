@@ -36,8 +36,6 @@ const firebaseConfig = {
 // Initialize Firebase
 const app = initializeApp(firebaseConfig);
 
-// Initialize Firestore
-const db = getFirestore(app);
 const storage = getStorage();
 const backendURL = "http://127.0.0.1:5000";
 
